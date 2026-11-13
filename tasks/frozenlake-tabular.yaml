@@ -1,0 +1,48 @@
+# Calibrated in step 9: see calibration/frozenlake-tabular.md.
+id: frozenlake-tabular
+version: 3  # v3: held-out env instances (unseen random maps), --env-kwargs contract
+instruction: |
+  Solve FrozenLake (4x4, slippery) with a tabular method from Sutton & Barto
+  (Q-learning, SARSA or Expected SARSA). Use numpy only.
+
+  Write train.py so that `python train.py --seed SEED --out DIR --env-kwargs JSON`
+  trains on `gymnasium.make("FrozenLake-v1", **json.loads(JSON))` and saves the
+  policy as data (e.g. a Q-table in DIR/q.npy; no pickle). Write policy.py with
+  `load(path)` returning an object whose `act(obs)` returns the greedy action.
+
+  Final scoring re-runs `python train.py --seed SEED --out DIR --env-kwargs JSON`
+  from scratch, with no other arguments, on random 4x4 maps you have never seen
+  (the map is passed in the env kwargs), and evaluates each resulting policy on
+  held-out seeds. On every map the policy must reach the threshold fraction of the
+  optimal policy's success rate on that map. A solution that only works on the
+  default map will fail. Use run_training's `variant` argument (1, 2, 3 are public
+  random maps) to check that your method generalises.
+
+  Finish with REPORT.md: Method, Hyperparameters, Experiments, Results, Limitations.
+  In Results, write your result in bold exactly as the evaluate tool reported its dev
+  mean return (e.g. **0.735**); only cite runs (r1, r2, ...) that you actually ran.
+env_id: FrozenLake-v1
+env_kwargs:
+  map_name: 4x4
+  is_slippery: true
+seed: 1234
+success:
+  metric: mean_return          # return is 1 on reaching the goal, else 0
+  threshold: 0.70              # canonical map (dev feedback); final scoring uses hidden maps
+  eval_episodes: 1000
+  dev_eval_episodes: 200
+  eval_seed_salt: frozenlake-v1-heldout
+verification:
+  env_variants:
+    kind: frozenlake_random_map
+    count: 2                   # hidden maps; every one must pass
+    dev_count: 3               # public maps for the agent (variant 1..3)
+    frozen_p: 0.8
+    threshold_fraction_of_optimal: 0.9   # set from calibration (reference / optimal per map)
+budget:
+  wall_clock_s: 900
+  train_timeout_s: 120
+  max_tool_calls: 40
+  max_runs: 10
+methods:
+  allowed: [tabular_q_learning, sarsa, expected_sarsa]

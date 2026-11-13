@@ -1,0 +1,133 @@
+{
+  "task_id": "mountaincar-tilecoding",
+  "task_version": 3,
+  "seeds": 10,
+  "has_variants": false,
+  "threshold": -110.0,
+  "gym_reward_threshold": -110.0,
+  "results": [
+    {
+      "seed": 1234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -99.71,
+      "random_mean": -200.0,
+      "threshold": -110.0,
+      "rerun_seconds": 4.815,
+      "variants": [],
+      "detail": "pass: mean -99.71 vs threshold -110"
+    },
+    {
+      "seed": 2234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -102.72,
+      "random_mean": -200.0,
+      "threshold": -110.0,
+      "rerun_seconds": 4.782,
+      "variants": [],
+      "detail": "pass: mean -102.7 vs threshold -110"
+    },
+    {
+      "seed": 3234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -106.83,
+      "random_mean": -200.0,
+      "threshold": -110.0,
+      "rerun_seconds": 4.434,
+      "variants": [],
+      "detail": "pass: mean -106.8 vs threshold -110"
+    },
+    {
+      "seed": 4234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -100.92,
+      "random_mean": -200.0,
+      "threshold": -110.0,
+      "rerun_seconds": 4.395,
+      "variants": [],
+      "detail": "pass: mean -100.9 vs threshold -110"
+    },
+    {
+      "seed": 5234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -100.64,
+      "random_mean": -200.0,
+      "threshold": -110.0,
+      "rerun_seconds": 4.429,
+      "variants": [],
+      "detail": "pass: mean -100.6 vs threshold -110"
+    },
+    {
+      "seed": 6234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -99.98,
+      "random_mean": -200.0,
+      "threshold": -110.0,
+      "rerun_seconds": 4.546,
+      "variants": [],
+      "detail": "pass: mean -99.98 vs threshold -110"
+    },
+    {
+      "seed": 7234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -100.27,
+      "random_mean": -200.0,
+      "threshold": -110.0,
+      "rerun_seconds": 4.517,
+      "variants": [],
+      "detail": "pass: mean -100.3 vs threshold -110"
+    },
+    {
+      "seed": 8234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -100.75,
+      "random_mean": -200.0,
+      "threshold": -110.0,
+      "rerun_seconds": 4.51,
+      "variants": [],
+      "detail": "pass: mean -100.8 vs threshold -110"
+    },
+    {
+      "seed": 9234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -99.1,
+      "random_mean": -200.0,
+      "threshold": -110.0,
+      "rerun_seconds": 4.424,
+      "variants": [],
+      "detail": "pass: mean -99.1 vs threshold -110"
+    },
+    {
+      "seed": 10234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -106.33,
+      "random_mean": -200.0,
+      "threshold": -110.0,
+      "rerun_seconds": 4.402,
+      "variants": [],
+      "detail": "pass: mean -106.3 vs threshold -110"
+    }
+  ],
+  "pass_rate": 1.0,
+  "random_fails_everywhere": true,
+  "deterministic": true,
+  "max_rerun_seconds": 4.815,
+  "suggested_train_timeout_s": 30,
+  "eval_means": {
+    "min": -106.83,
+    "median": -100.695,
+    "max": -99.1
+  },
+  "optimal_fraction": null,
+  "admitted": true,
+  "reasons": []
+}

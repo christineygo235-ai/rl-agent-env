@@ -1,0 +1,35 @@
+# Calibrated in step 9: see calibration/mountaincar-tilecoding.md.
+id: mountaincar-tilecoding
+version: 3  # v3: calibrated threshold (-110) and budget; --env-kwargs contract
+instruction: |
+  Solve MountainCar-v0 with a classic method from Sutton & Barto; tile coding
+  with linear SARSA or Q-learning (chapter 10) is recommended. Use numpy only.
+
+  Write train.py so that `python train.py --seed SEED --out DIR --env-kwargs JSON`
+  trains on `gymnasium.make("MountainCar-v0", **json.loads(JSON))` and saves the
+  policy as data (npy/npz/json, no pickle). Write policy.py with `load(path)`
+  returning an object whose `act(obs)` returns the greedy action.
+
+  Final scoring re-runs `python train.py --seed SEED --out DIR --env-kwargs JSON`
+  from scratch with no other arguments, then evaluates the policy on held-out seeds.
+
+  Finish with REPORT.md: Method, Hyperparameters, Experiments, Results, Limitations.
+  In Results, write your result in bold exactly as the evaluate tool reported its dev
+  mean return (e.g. **-104.5**); only cite runs (r1, r2, ...) that you actually ran.
+env_id: MountainCar-v0
+seed: 1234
+success:
+  metric: mean_return          # -1 per step, episode capped at 200 steps
+  threshold: -110.0             # calibrated: Gymnasium reward_threshold; reference -99..-107 over 10 seeds
+  eval_episodes: 100
+  dev_eval_episodes: 20
+  eval_seed_salt: mountaincar-v0-heldout
+budget:
+  wall_clock_s: 1800
+  train_timeout_s: 120
+  max_tool_calls: 60
+  max_runs: 15
+methods:
+  allowed: [tile_coding, sarsa, expected_sarsa, tabular_q_learning, small_dqn]
+limits:
+  dqn_max_params: 50000

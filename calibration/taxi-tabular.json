@@ -1,0 +1,133 @@
+{
+  "task_id": "taxi-tabular",
+  "task_version": 1,
+  "seeds": 10,
+  "has_variants": false,
+  "threshold": 7.5,
+  "gym_reward_threshold": 8,
+  "results": [
+    {
+      "seed": 1234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": 8.008,
+      "random_mean": -775.625,
+      "threshold": 7.5,
+      "rerun_seconds": 2.614,
+      "variants": [],
+      "detail": "pass: mean 8.008 vs threshold 7.5"
+    },
+    {
+      "seed": 2234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": 7.984,
+      "random_mean": -767.721,
+      "threshold": 7.5,
+      "rerun_seconds": 2.736,
+      "variants": [],
+      "detail": "pass: mean 7.984 vs threshold 7.5"
+    },
+    {
+      "seed": 3234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": 7.829,
+      "random_mean": -771.013,
+      "threshold": 7.5,
+      "rerun_seconds": 2.653,
+      "variants": [],
+      "detail": "pass: mean 7.829 vs threshold 7.5"
+    },
+    {
+      "seed": 4234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": 7.989,
+      "random_mean": -772.594,
+      "threshold": 7.5,
+      "rerun_seconds": 2.615,
+      "variants": [],
+      "detail": "pass: mean 7.989 vs threshold 7.5"
+    },
+    {
+      "seed": 5234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": 7.979,
+      "random_mean": -770.554,
+      "threshold": 7.5,
+      "rerun_seconds": 2.666,
+      "variants": [],
+      "detail": "pass: mean 7.979 vs threshold 7.5"
+    },
+    {
+      "seed": 6234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": 7.898,
+      "random_mean": -771.731,
+      "threshold": 7.5,
+      "rerun_seconds": 2.67,
+      "variants": [],
+      "detail": "pass: mean 7.898 vs threshold 7.5"
+    },
+    {
+      "seed": 7234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": 7.971,
+      "random_mean": -770.502,
+      "threshold": 7.5,
+      "rerun_seconds": 2.681,
+      "variants": [],
+      "detail": "pass: mean 7.971 vs threshold 7.5"
+    },
+    {
+      "seed": 8234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": 8.185,
+      "random_mean": -769.059,
+      "threshold": 7.5,
+      "rerun_seconds": 2.652,
+      "variants": [],
+      "detail": "pass: mean 8.185 vs threshold 7.5"
+    },
+    {
+      "seed": 9234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": 7.935,
+      "random_mean": -767.638,
+      "threshold": 7.5,
+      "rerun_seconds": 2.628,
+      "variants": [],
+      "detail": "pass: mean 7.935 vs threshold 7.5"
+    },
+    {
+      "seed": 10234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": 7.765,
+      "random_mean": -771.311,
+      "threshold": 7.5,
+      "rerun_seconds": 2.626,
+      "variants": [],
+      "detail": "pass: mean 7.765 vs threshold 7.5"
+    }
+  ],
+  "pass_rate": 1.0,
+  "random_fails_everywhere": true,
+  "deterministic": true,
+  "max_rerun_seconds": 2.736,
+  "suggested_train_timeout_s": 30,
+  "eval_means": {
+    "min": 7.765,
+    "median": 7.975,
+    "max": 8.185
+  },
+  "optimal_fraction": null,
+  "admitted": true,
+  "reasons": []
+}

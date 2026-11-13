@@ -1,0 +1,33 @@
+"""Greedy policy for a tabular Q-learning agent on FrozenLake-v1."""
+
+import os
+
+import numpy as np
+
+
+class GreedyQPolicy:
+    def __init__(self, q):
+        self.q = np.asarray(q, dtype=np.float64)
+
+    def act(self, obs):
+        return int(np.argmax(self.q[int(obs)]))
+
+
+def _resolve(path):
+    if os.path.isdir(path):
+        for name in ("q.npy", "q.npz"):
+            cand = os.path.join(path, name)
+            if os.path.exists(cand):
+                return cand
+    return path
+
+
+def load(path):
+    path = _resolve(path)
+    if path.endswith(".npz"):
+        with np.load(path) as data:
+            key = "q" if "q" in data.files else data.files[0]
+            q = data[key]
+    else:
+        q = np.load(path)
+    return GreedyQPolicy(q)

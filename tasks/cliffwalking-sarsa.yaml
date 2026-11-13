@@ -1,0 +1,35 @@
+# Calibrated in step 9: see calibration/cliffwalking-sarsa.md.
+id: cliffwalking-sarsa
+version: 1
+instruction: |
+  Solve CliffWalking-v1 (the textbook gridworld, not slippery) with a tabular TD
+  method from Sutton & Barto (SARSA, Expected SARSA or Q-learning). Use numpy only.
+
+  Write train.py so that `python train.py --seed SEED --out DIR --env-kwargs JSON`
+  trains on `gymnasium.make("CliffWalking-v1", **json.loads(JSON))` and saves the
+  policy as data (e.g. a Q-table in DIR/q.npy; no pickle). Write policy.py with
+  `load(path)` returning an object whose `act(obs)` returns the greedy action.
+  Episodes are capped at 200 steps during evaluation.
+
+  Final scoring re-runs `python train.py --seed SEED --out DIR --env-kwargs JSON`
+  from scratch with no other arguments, then evaluates the policy on held-out seeds.
+
+  Finish with REPORT.md: Method, Hyperparameters, Experiments, Results, Limitations.
+  In Results, write your result in bold exactly as the evaluate tool reported its dev
+  mean return (e.g. **-17.0**); only cite runs (r1, r2, ...) that you actually ran.
+env_id: CliffWalking-v1
+seed: 1234
+max_episode_steps: 200           # CliffWalking-v1 has no TimeLimit of its own
+success:
+  metric: mean_return          # -1 per step, -100 for falling off the cliff
+  threshold: -17.0             # SARSA's safe path; Q-learning's optimal path scores -13
+  eval_episodes: 100
+  dev_eval_episodes: 20
+  eval_seed_salt: cliffwalking-v1-heldout
+budget:
+  wall_clock_s: 600
+  train_timeout_s: 60
+  max_tool_calls: 40
+  max_runs: 10
+methods:
+  allowed: [tabular_q_learning, sarsa, expected_sarsa]

@@ -1,0 +1,122 @@
+Empty workspace. Let me write train.py and policy.py.
+
+Key considerations:
+- Random 4x4 maps with frozen_p=0.8 (so 80% frozen, 20% holes), map is passed in env kwargs (as map_name? or desc?). Likely `map_name` is replaced by a generated map via `desc`. Let's handle generic: pass **json.loads(JSON) to gymnasium.make.
+- Training on 4x4 slippery FrozenLake with a good tabular method. Q-learning with epsilon-greedy, decayed. Need robust performance: threshold 0.9 * optimal success rate. On slippery 4x4, optimal success rate ~0.74. 0.9*0.74 = 0.67. On random maps, optimal might be lower. Need to be near optimal.
+
+Best approach: Expected SARSA or Q-learning with decaying epsilon + optimistic init? Actually a robust and simple approach: run many episodes of Q-learning with epsilon decaying from 1.0 to ~0.01 over e.g. 20000 episodes. 4x4 state space = 16 states, 4 actions. 20000 episodes is fast (~a few seconds).
+
+Also important: use the actual env provided. But careful — env kwargs might include `desc`. Also max_episode_steps: null.
+
+To be safest and near-optimal, I could combine: use model-based value iteration? Not allowed — must be tabular method from S&tB (Q-learning, SARSA, Expected SARSA). Metric is success rate on held-out seeds. I'll do Expected SARSA or Q-learning with decaying epsilon and multiple runs averaged? Let's do Q-learning with epsilon decay and also learning rate decay. Actually to get near-optimal greedy policy for slippery stochastic env, Q-learning with a decent number of episodes typically converges to optimal.
+
+One caveat: on slippery FrozenLake, Q-learning's greedy policy may sometimes differ due to stochasticity, but with enough episodes it converges.
+
+Better idea: to maximize reliability, run several independent Q-learning agents and pick... we can't evaluate without network? We can't interact with the env after training in scoring except act. But within train.py, we can create the env ourselves (using the same kwargs) and do model-free training only — we should not do planning (that would be model-based, not allowed by method restriction). Actually the restriction is on the method allowed; using env for training is fine. But let's keep it pure tabular Q-learning.
+
+I could do this: train Q-learning with decaying epsilon (GLIE), and anneal. Let me plan episodes: 30000 episodes with alpha=0.1 constant? For 16 states, constant alpha 0.1 with epsilon decaying 1->0.01 over first 60% then 0.01... Expected SARSA is a bit better for stochastic. Let me use Expected SARSA with epsilon decay.
+
+Hmm, one concern is the "frozen_p 0.8" random maps: desc generated with 80% frozen. Some maps may have very short paths or the goal adjacent to start. Fine.
+
+Also need to handle map kwargs robustly: the JSON might contain `desc` as list of strings, or `map_name`. Just pass through.
+
+Also is_slippery might be true. Also could be False? spec says is_slippery: true. Handle all.
+
+Let me also handle observation possibly being a numpy int. Greedy tie-breaking: use argmax on Q; for ties, prefer... it doesn't matter much, but with slippery stochastic env, ties can occur for actions that never get explored. Use argmax.
+
+Let me write code with an approach that's robust: multiple restarts with different epsilon schedules and pick the Q-table with the highest estimated greedy-policy success rate under a self-model? That would be model-based planning (value iteration) — not allowed strictly. But we could estimate greedy-policy performance by running a small number of episodes with the greedy policy (policy evaluation from interaction, not model). That's allowed — it's just evaluation using the env, model-free. That's a form of selecting with estimate, fine.
+
+Actually simplest robust plan: train K=5 independent Q-learning runs (different seeds), evaluate each greedy policy with 100 greedy episodes (no exploration) on the env, pick best. Total env interaction: 5 * (20000 + 100*avg steps). 20000 episodes of 4x4 FrozenLake: average episode length under exploration maybe 10-20 steps → ~300k steps, 5 runs = 1.5M steps. Python loop speed ~ maybe 100k steps/sec? gym FrozenLake step is relatively slow (~50k/s). 1.5M steps could be 30-60s. Timeout is 120s. Hmm, risky. Let's reduce: 2 restarts x 12000 episodes. Or reduce episodes to 8000 which is plenty for 16 states.
+
+Let me estimate: 8000 episodes × ~15 steps = 120k steps per run. 3 runs = 360k steps. Should be ~10s. Fine.
+
+Alternative: write my own fast internal simulator? Not necessary.
+
+Actually, a faster approach: since we only need the Q-table, we could implement our own FrozenLake model in numpy to train faster... but training env is given. Using gym env is fine and cheap enough.
+
+Let's also do smart epsilon: for tabular Q-learning in stochastic env with small state space, a good scheme: epsilon = 0.5 for first portion, then decay. Let me use: epsilon = max(0.05, 1.0 - episode/ (0.5*N)) and alpha = 0.15 decaying? I'll use alpha = 0.2 constant for the first half then 0.1... Simpler: alpha = 0.9 counter-based: alpha = 1/(1+visits(s,a))**0.7 — expected sarsa with decreasing step size converges. Hmm.
+
+I'll do Q-learning with alpha=0.15, epsilon decayed exponentially from 1.0 to 0.02 over episodes, N=10000. Plus final greedy evaluation selection among restarts. Let me also add a "polish" phase: after main training, run extra episodes with epsilon=0.01? Included via decay.
+
+Actually one important trick for deterministic optimality in slippery FrozenLake: Q-learning with epsilon-greedy converges to Q* which yields the optimal policy. Should be fine.
+
+Let me also consider whether optimal success rate is ~0.74 for default 4x4. Threshold 0.9*0.74 = 0.67. Our policy should give ~0.74.
+
+Let me implement, test on variant 1,2,3, and default.
+
+Design of policy.py: class with load(path) reading q.npy; act(obs) -> int(np.argmax(q[obs])).
+
+train.py must accept --seed SEED --out DIR --env-kwargs JSON. It saves q.npy in DIR. Should create DIR if needed.
+
+Also maybe save actions.npy? Only q.npy needed.
+
+Let's write.
+
+Internal env: gymnasium.make("FrozenLake-v1", **kwargs). For evaluation selection, use separate env with same kwargs.
+
+Careful: for evaluation during train selection, use a fresh env seeded differently. Greedy policy eval with 200 episodes for 3 candidates = 600 episodes × ~ up to 100 steps (greedy in slippery lake can wander... episode limit 200 default for FrozenLake? max_episode_steps defaults to 100 for FrozenLake-v1? Actually FrozenLake-v1 has max_episode_steps=100 registered. Fine, up to 100 steps). 600 episodes × ~30 steps = 18k steps. Cheap.
+
+Let me write the code.
+
+Also handle `desc` from kwargs: gymnasium.make passes desc as list of strings. Fine.
+
+Additionally, kwargs might include 'render_mode'? unlikely.
+
+Let me write train.py.
+
+```python
+import argparse, json, os
+import numpy as np
+import gymnasium as gym
+
+def make_env(kwargs):
+    kw = dict(kwargs)
+    kw.pop("render_mode", None)
+    return gym.make("FrozenLake-v1", **kw)
+
+def q_learning(kwargs, seed, episodes=12000, alpha=0.15, gamma=0.99, eps_end=0.02, ...):
+```
+
+Note gamma=0.99 or 1.0? For FrozenLake, gamma=0.99 typical; with 1.0 the max steps limit issue... use 0.99.
+
+Implement Expected SARSA too? Let's just use Q-learning (allowed). Actually Expected SARSA is generally better in stochastic envs for on-policy; but we act greedily at test, so Q-learning is arguably the best fit (off-policy, learns Q*). Use Q-learning.
+
+Implementation details for speed: use env.unwrapped? Use `env.reset(seed=...)` and `env.step(a)` returning (obs, r, terminated, truncated, info). Treat truncated as done for learning (no bootstrapping).
+
+Speed: Q-learning loop in python with gym step. Fine.
+
+Also for selecting best among restarts, use different seeds and different epsilon schedules slightly.
+
+Let me write a single training function run with n_restarts=3.
+
+Actually, since we want robustness across unknown maps, more restarts with best-selection by greedy eval is good. But greedy eval estimates could be noisy on the same env (200 episodes). With success rate ~0.7 vs 0.6, 200 episodes → std ~0.032, distinguish fine.
+
+Alternatively, do a "learning with restarts and keep the best by greedy-evaluation". I'll implement that.
+
+Let me write files now.
+
+Also add a small refinement: after selecting best Q, do a final greedy-with-epsilon (epsilon=0.05) improvement loop of 2000 episodes? Not needed.
+
+Let's write.
+
+For evaluation, note the "obs" may be int. q table size = env.observation_space.n, 16 → but with map_name 4x4 always 16. Use n from env.
+
+Write policy.py:
+
+```python
+import numpy as np
+
+class GreedyPolicy:
+    def __init__(self, q):
+        self.q = np.asarray(q, dtype=np.float64)
+    def act(self, obs):
+        return int(np.argmax(self.q[int(obs)]))
+
+def load(path):
+    q = np.load(os.path.join(path, 'q.npy'))
+    return GreedyPolicy(q)
+```
+
+Path may be a dir or a file? Contract says load(path) returning object whose act(obs) is greedy. The harness likely passes DIR (the out dir) since train saves to DIR/q.npy. To be safe, handle both: if path is a directory, load q.npy; else load the file directly. Also allow .npz fallback.
+
+Now write.

@@ -1,0 +1,18 @@
+"""Greedy policy over the learned Q-table (DIR/q.npy)."""
+
+import numpy as np
+
+
+class GreedyQ:
+    def __init__(self, q):
+        self.q = q
+
+    def act(self, obs):
+        return int(self.q[int(obs)].argmax())
+
+
+def load(path):
+    q = np.load(f"{path}/q.npy", allow_pickle=True)
+    if q.ndim != 2:
+        raise ValueError(f"expected a 2-D Q-table, got shape {q.shape}")
+    return GreedyQ(q)

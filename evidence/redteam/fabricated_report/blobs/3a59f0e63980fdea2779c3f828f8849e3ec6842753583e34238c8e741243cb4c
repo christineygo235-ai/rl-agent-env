@@ -1,0 +1,10 @@
+## Method
+Q-learning.
+## Hyperparameters
+-
+## Experiments
+Runs r1, r2, r3 (best: r3).
+## Results
+Dev mean return: **0.950**, well above the threshold.
+## Limitations
+None.

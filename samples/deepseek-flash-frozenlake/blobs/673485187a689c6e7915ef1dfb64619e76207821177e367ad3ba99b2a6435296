@@ -1,0 +1,176 @@
+"""Tabular RL on FrozenLake-v1 (Expected SARSA / Q-learning / SARSA).
+
+Usage:
+    python train.py --seed SEED --out DIR --env-kwargs JSON [options]
+
+Saves DIR/q.npy (Q-table) and DIR/meta.json (map + settings).  No pickle.
+"""
+import argparse
+import json
+import os
+import time
+
+import numpy as np
+import gymnasium as gym
+
+
+# ---------------------------------------------------------------- utilities
+def make_env(env_kwargs, seed=None):
+    env = gym.make("FrozenLake-v1", disable_env_checker=True, **env_kwargs)
+    if seed is not None:
+        env.reset(seed=int(seed))
+        env.action_space.seed(int(seed) + 1)
+    return env
+
+
+def epsilon_at(ep, episodes, eps_start, eps_end, frac):
+    """Linear decay from eps_start to eps_end over frac*episodes, then constant."""
+    span = max(1.0, frac * episodes)
+    f = min(1.0, ep / span)
+    return eps_start + (eps_end - eps_start) * f
+
+
+def train_one(env_kwargs, seed, episodes, alpha, gamma, eps_start, eps_end,
+              decay_frac, method, max_steps=None):
+    """One tabular learner.  Returns the Q-table."""
+    env = make_env(env_kwargs, seed=seed)
+    nS = env.observation_space.n
+    nA = env.action_space.n
+    Q = np.zeros((nS, nA), dtype=np.float64)
+    rng = np.random.default_rng(seed)
+    ep_lengths = 0
+    steps = 0
+    for ep in range(episodes):
+        eps = epsilon_at(ep, episodes, eps_start, eps_end, decay_frac)
+        s, _ = env.reset()
+        s = int(s)
+        done = False
+        t = 0
+        while not done:
+            t += 1
+            if rng.random() < eps:
+                a = int(rng.integers(nA))
+            else:
+                a = int(np.argmax(Q[s]))
+            s2, r, term, trunc, _ = env.step(a)
+            s2 = int(s2)
+            if term:
+                target = r
+            else:
+                qrow = Q[s2]
+                if method == "tabular_q_learning":
+                    target = r + gamma * qrow.max()
+                elif method == "sarsa":
+                    # on-policy: sample next action from same eps-greedy policy
+                    if rng.random() < eps:
+                        a2 = int(rng.integers(nA))
+                    else:
+                        a2 = int(np.argmax(qrow))
+                    target = r + gamma * qrow[a2]
+                else:  # expected_sarsa
+                    qmax = qrow.max()
+                    k = np.count_nonzero(qrow == qmax)
+                    greedy_part = (k * qmax)
+                    target = r + gamma * ((1.0 - eps) * qmax
+                                          + (eps / nA) * qrow.sum())
+                if trunc:
+                    pass  # bootstrap on truncation
+            Q[s, a] += alpha * (target - Q[s, a])
+            s = s2
+            done = term or trunc
+        ep_lengths += t
+        steps += t
+    env.close()
+    return Q, ep_lengths / max(1, episodes)
+
+
+def greedy_success(Q, env_kwargs, n=300, seed=99991):
+    """Estimate greedy-policy success rate (used for model selection)."""
+    env = make_env(env_kwargs, seed=seed)
+    wins = 0
+    for i in range(n):
+        s, _ = env.reset()
+        s = int(s)
+        done = False
+        while not done:
+            s, r, term, trunc, _ = env.step(int(np.argmax(Q[int(s)])))
+            s = int(s)
+            done = term or trunc
+            if term and r > 0:
+                wins += 1
+    env.close()
+    return wins / n
+
+
+# ---------------------------------------------------------------- main
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--out", type=str, required=True)
+    p.add_argument("--env-kwargs", type=str, default="{}")
+    p.add_argument("--episodes", type=int, default=20000)
+    p.add_argument("--learners", type=int, default=1)
+    p.add_argument("--alpha", type=float, default=0.1)
+    p.add_argument("--gamma", type=float, default=0.99)
+    p.add_argument("--eps-start", type=float, default=1.0)
+    p.add_argument("--eps-end", type=float, default=0.05)
+    p.add_argument("--decay-frac", type=float, default=0.5)
+    p.add_argument("--method", type=str, default="expected_sarsa")
+    p.add_argument("--select-episodes", type=int, default=200)
+    args = p.parse_args()
+
+    env_kwargs = json.loads(args.env_kwargs) if args.env_kwargs else {}
+    env_kwargs.setdefault("is_slippery", True)
+    env_kwargs.setdefault("map_name", "4x4")
+
+    os.makedirs(args.out, exist_ok=True)
+    t0 = time.time()
+    best_Q, best_score, runs = None, -1.0, []
+    for k in range(max(1, args.learners)):
+        tk = time.time()
+        Q, avglen = train_one(env_kwargs, args.seed + 1000 * k, args.episodes,
+                              args.alpha, args.gamma, args.eps_start,
+                              args.eps_end, args.decay_frac, args.method)
+        el = time.time() - tk
+        if args.learners > 1:
+            score = greedy_success(Q, env_kwargs, n=args.select_episodes,
+                                   seed=50000 + 7 * k)
+        else:
+            score = float("nan")
+        runs.append((k, el, avglen, score))
+        print(f"learner {k}: {el:.1f}s avg_len={avglen:.1f} sel={score}")
+        if best_Q is None or (score == score and score > best_score):
+            best_Q, best_score = Q, score
+    np.save(os.path.join(args.out, "q.npy"), best_Q.astype(np.float32))
+
+    desc = None
+    try:
+        tmp = make_env(env_kwargs)
+        desc = list(tmp.unwrapped.desc)
+        desc = ["".join(row.tolist() if hasattr(row, "tolist") else row)
+                for row in desc]
+        tmp.close()
+    except Exception:
+        desc = None
+    meta = {
+        "method": args.method,
+        "seed": args.seed,
+        "episodes": args.episodes,
+        "learners": args.learners,
+        "alpha": args.alpha,
+        "gamma": args.gamma,
+        "eps_start": args.eps_start,
+        "eps_end": args.eps_end,
+        "decay_frac": args.decay_frac,
+        "nS": int(best_Q.shape[0]),
+        "nA": int(best_Q.shape[1]),
+        "desc": desc,
+        "env_kwargs": {k: v for k, v in env_kwargs.items() if k != "desc"},
+    }
+    with open(os.path.join(args.out, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    print("total train time %.1fs" % (time.time() - t0))
+
+
+if __name__ == "__main__":
+    main()

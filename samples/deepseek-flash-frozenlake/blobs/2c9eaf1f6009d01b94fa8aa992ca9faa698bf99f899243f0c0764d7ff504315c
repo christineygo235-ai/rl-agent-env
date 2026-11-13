@@ -1,0 +1,222 @@
+"""Tabular RL on FrozenLake-v1 (Expected SARSA / Q-learning / SARSA).
+
+Usage:
+    python train.py --seed SEED --out DIR --env-kwargs JSON [options]
+
+Saves DIR/q.npy (Q-table, float32) and DIR/meta.json (map + settings). No pickle.
+"""
+import argparse
+import json
+import os
+import time
+
+import numpy as np
+import gymnasium as gym
+
+
+# ---------------------------------------------------------------- utilities
+def make_env(env_kwargs, seed=None):
+    env = gym.make("FrozenLake-v1", disable_env_checker=True, **env_kwargs)
+    if seed is not None:
+        env.reset(seed=int(seed))
+        env.action_space.seed(int(seed) + 1)
+    return env
+
+
+def epsilon_at(ep, episodes, eps_start, eps_end, frac):
+    """Linear decay eps_start -> eps_end over frac*episodes, then constant."""
+    span = max(1.0, frac * episodes)
+    f = min(1.0, ep / span)
+    return eps_start + (eps_end - eps_start) * f
+
+
+def train_one(env_kwargs, seed, episodes, alpha, gamma, eps_start, eps_end,
+              decay_frac, method):
+    """One tabular learner.  Returns (Q, mean episode length)."""
+    env = make_env(env_kwargs, seed=seed)
+    nS = env.observation_space.n
+    nA = env.action_space.n
+    Q = np.zeros((nS, nA), dtype=np.float64)
+    rng = np.random.default_rng(seed)
+    steps = 0
+    for ep in range(episodes):
+        eps = epsilon_at(ep, episodes, eps_start, eps_end, decay_frac)
+        s, _ = env.reset()
+        s = int(s)
+        done = False
+        t = 0
+        while not done:
+            t += 1
+            if rng.random() < eps:
+                a = int(rng.integers(nA))
+            else:
+                a = int(np.argmax(Q[s]))
+            s2, r, term, trunc, _ = env.step(a)
+            s2 = int(s2)
+            if term:
+                target = r
+            else:
+                qrow = Q[s2]
+                if method == "tabular_q_learning":
+                    target = r + gamma * qrow.max()
+                elif method == "sarsa":
+                    if rng.random() < eps:
+                        a2 = int(rng.integers(nA))
+                    else:
+                        a2 = int(np.argmax(qrow))
+                    target = r + gamma * qrow[a2]
+                else:  # expected_sarsa (default)
+                    qmax = qrow.max()
+                    target = r + gamma * ((1.0 - eps) * qmax
+                                          + (eps / nA) * qrow.sum())
+            Q[s, a] += alpha * (target - Q[s, a])
+            s = s2
+            done = term or trunc
+        steps += t
+    env.close()
+    return Q, steps / max(1, episodes)
+
+
+def greedy_success(Q, env_kwargs, n=300, seed=99991):
+    """Estimate greedy-policy success rate with fresh evaluation episodes."""
+    env = make_env(env_kwargs, seed=seed)
+    wins = 0
+    for _ in range(n):
+        s, _ = env.reset()
+        done = False
+        while not done:
+            s, r, term, trunc, _ = env.step(int(np.argmax(Q[int(s)])))
+            s = int(s)
+            done = term or trunc
+            if term and r > 0:
+                wins += 1
+    env.close()
+    return wins / n
+
+
+# ------------------------------------------------------- diagnostics (report)
+def _report_reference_dp(env_kwargs, Q, n=1000, seed=99991, gamma=0.99):
+    """REPORTING ONLY: value-iteration reference on the true model.
+
+    This never influences the saved artefact; it is only printed so that the
+    experiment can be compared against the optimum of the MDP.
+    """
+    env = make_env(env_kwargs)
+    P = env.unwrapped.P
+    nS = env.observation_space.n
+    nA = env.action_space.n
+    V = np.zeros(nS)
+    for _ in range(20000):
+        d = 0.0
+        for s in range(nS):
+            best = -1e18
+            for a in range(nA):
+                q = 0.0
+                for p, s2, r, term in P[s][a]:
+                    q += p * (r + (0.0 if term else gamma * V[s2]))
+                best = max(best, q)
+            d = max(d, abs(best - V[s]))
+            V[s] = best
+        if d < 1e-12:
+            break
+    Qstar = np.zeros((nS, nA))
+    for s in range(nS):
+        for a in range(nA):
+            Qstar[s, a] = sum(p * (r + (0.0 if term else gamma * V[s2]))
+                              for p, s2, r, term in P[s][a])
+    opt_succ = greedy_success(Qstar, env_kwargs, n=n, seed=seed)
+    agree = float(np.mean(np.argmax(Qstar, 1) == np.argmax(Q, 1)))
+    env.close()
+    print(f"[diag] DP-optimal success={opt_succ:.3f} policy_agreement={agree:.3f}")
+    return opt_succ
+
+
+# ---------------------------------------------------------------- main
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--out", type=str, required=True)
+    p.add_argument("--env-kwargs", type=str, default="{}")
+    p.add_argument("--episodes", type=int, default=40000)
+    p.add_argument("--learners", type=int, default=3)
+    p.add_argument("--alpha", type=float, default=0.1)
+    p.add_argument("--gamma", type=float, default=0.99)
+    p.add_argument("--eps-start", type=float, default=1.0)
+    p.add_argument("--eps-end", type=float, default=0.05)
+    p.add_argument("--decay-frac", type=float, default=0.5)
+    p.add_argument("--method", type=str, default="expected_sarsa")
+    p.add_argument("--select-episodes", type=int, default=600)
+    p.add_argument("--agg", type=str, default="both")  # best|mean|both
+    p.add_argument("--diag", type=int, default=0)
+    args = p.parse_args()
+
+    env_kwargs = json.loads(args.env_kwargs) if args.env_kwargs else {}
+    env_kwargs.setdefault("is_slippery", True)
+    env_kwargs.setdefault("map_name", "4x4")
+
+    os.makedirs(args.out, exist_ok=True)
+    t0 = time.time()
+    n_learners = max(1, args.learners)
+    Qs = []
+    for k in range(n_learners):
+        tk = time.time()
+        Q, avglen = train_one(env_kwargs, args.seed + 1000 * k, args.episodes,
+                              args.alpha, args.gamma, args.eps_start,
+                              args.eps_end, args.decay_frac, args.method)
+        print(f"learner {k}: {time.time()-tk:.1f}s avg_len={avglen:.1f}")
+        Qs.append(Q)
+
+    cands = {}
+    for k, Q in enumerate(Qs):
+        cands[f"l{k}"] = Q
+    if n_learners > 1:
+        cands["mean"] = np.mean(np.stack(Qs, 0), axis=0)
+
+    scores = {}
+    for name, Q in cands.items():
+        if name.startswith("l") and n_learners > 1 and args.agg == "mean":
+            continue
+        if name == "mean" and args.agg == "best":
+            continue
+        n_eval = args.select_episodes if name != "mean" else 2 * args.select_episodes
+        scores[name] = greedy_success(Q, env_kwargs, n=n_eval, seed=50000)
+        print(f"select {name}: {scores[name]:.3f}")
+    best_name = max(scores, key=lambda k: scores[k])
+    best_Q = cands[best_name]
+    print(f"chosen={best_name} score={scores[best_name]:.3f}")
+    np.save(os.path.join(args.out, "q.npy"), best_Q.astype(np.float32))
+
+    desc = None
+    try:
+        tmp = make_env(env_kwargs)
+        desc = ["".join(map(str, row)) for row in tmp.unwrapped.desc]
+        tmp.close()
+    except Exception:
+        desc = None
+
+    if args.diag:
+        _report_reference_dp(env_kwargs, best_Q, n=args.select_episodes)
+
+    meta = {
+        "method": args.method,
+        "seed": args.seed,
+        "episodes": args.episodes,
+        "learners": n_learners,
+        "alpha": args.alpha,
+        "gamma": args.gamma,
+        "eps_start": args.eps_start,
+        "eps_end": args.eps_end,
+        "decay_frac": args.decay_frac,
+        "chosen": best_name,
+        "nS": int(best_Q.shape[0]),
+        "nA": int(best_Q.shape[1]),
+        "desc": desc,
+        "env_kwargs": {k: v for k, v in env_kwargs.items() if k != "desc"},
+    }
+    with open(os.path.join(args.out, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    print("total train time %.1fs" % (time.time() - t0))
+
+
+if __name__ == "__main__":
+    main()

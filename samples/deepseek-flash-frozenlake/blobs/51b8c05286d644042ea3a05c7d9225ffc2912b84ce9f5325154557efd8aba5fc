@@ -1,0 +1,234 @@
+"""Tabular RL on FrozenLake-v1 -- Expected SARSA with a greedy refinement phase.
+
+    python train.py --seed SEED --out DIR --env-kwargs JSON [options]
+
+The map is taken from --env-kwargs (e.g. {"desc": [...]}, {"map_name": "4x4"}),
+so the same code works for the default map and for unseen random maps.
+
+Artefacts written to DIR:
+    q.npy     -- float64 Q-table, shape (n_states, n_actions)
+    meta.json -- the map description and the hyper-parameters used
+
+No pickle is used anywhere.
+
+Method (tabular, numpy only)
+---------------------------
+* Expected SARSA control (Sutton & Barto, sec. 6.6) with an epsilon-greedy
+  behaviour policy:
+      Q(s,a) <- Q(s,a) + alpha [ r + gamma * sum_a' pi(a'|s') Q(s',a') - Q(s,a) ]
+* Three phases per learner, all sharing one table:
+    A) exploration    : epsilon 1.0 -> eps_end (linear), alpha = 0.1
+    B) refinement     : epsilon ~ 0.01, small alpha  -> removes the
+                        epsilon-soft bias of the phase-A values
+    C) polish         : epsilon ~ 0.005, alpha 0.01  -> nearly exact evaluation
+                        of the greedy policy that phases A/B produced
+* Several independent learners (different RNG seeds) are trained.  All
+  intermediate tables (A, B, C per learner) plus the mean of the C tables are
+  candidate policies; the one with the highest success rate measured on fresh
+  rollout episodes (common, i.e. paired, evaluation seeds) is saved.
+* A soft wall-clock guard skips later phases/learners if the budget runs low,
+  so a policy is always written well inside the time limit.
+"""
+import argparse
+import json
+import os
+import time
+
+import numpy as np
+import gymnasium as gym
+
+
+# ---------------------------------------------------------------- utilities
+def make_env(env_kwargs, seed=None):
+    """gymnasium FrozenLake; the seed only makes rollouts repeatable."""
+    env = gym.make("FrozenLake-v1", disable_env_checker=True, **env_kwargs)
+    if seed is not None:
+        env.reset(seed=int(seed))
+        env.action_space.seed(int(seed) + 1)
+    return env
+
+
+def epsilon_at(ep, episodes, eps_start, eps_end, frac):
+    """Linear decay eps_start -> eps_end over frac*episodes, then constant."""
+    span = max(1.0, frac * episodes)
+    f = min(1.0, ep / span)
+    return eps_start + (eps_end - eps_start) * f
+
+
+def td_target(Q, r, s2, term, eps, gamma, method, rng):
+    """Bootstrap target for the three tabular methods (expected SARSA default)."""
+    if term:
+        return r
+    qrow = Q[s2]
+    nA = qrow.shape[0]
+    if method == "tabular_q_learning":
+        return r + gamma * qrow.max()
+    if method == "sarsa":
+        a2 = int(rng.integers(nA)) if rng.random() < eps else int(np.argmax(qrow))
+        return r + gamma * qrow[a2]
+    # expected_sarsa: expectation under the same epsilon-greedy policy
+    return r + gamma * ((1.0 - eps) * qrow.max() + (eps / nA) * qrow.sum())
+
+
+def run_phase(env, Q, rng, episodes, alpha, gamma, method, eps_start, eps_end,
+              decay_frac, deadline=None):
+    """epsilon-greedy control episodes; Q is updated in place."""
+    nA = Q.shape[1]
+    for ep in range(episodes):
+        if deadline is not None and time.time() > deadline:
+            break
+        eps = epsilon_at(ep, episodes, eps_start, eps_end, decay_frac)
+        s, _ = env.reset()
+        s = int(s)
+        done = False
+        while not done:
+            if rng.random() < eps:
+                a = int(rng.integers(nA))
+            else:
+                a = int(np.argmax(Q[s]))
+            s2, r, term, trunc, _ = env.step(a)
+            s2 = int(s2)
+            target = td_target(Q, r, s2, term, eps, gamma, method, rng)
+            Q[s, a] += alpha * (target - Q[s, a])
+            s = s2
+            done = term or trunc
+
+
+def train_one(env_kwargs, seed, args, deadline=None):
+    """One learner; returns the tables after phases A, B and C."""
+    env = make_env(env_kwargs, seed=seed)
+    Q = np.zeros((env.observation_space.n, env.action_space.n), dtype=np.float64)
+    rng = np.random.default_rng(seed)
+    run_phase(env, Q, rng, args.episodes, args.alpha, args.gamma, args.method,
+              args.eps_start, args.eps_end, args.decay_frac, deadline)
+    QA = Q.copy()
+    if args.refine_episodes > 0:
+        run_phase(env, Q, rng, args.refine_episodes, args.alpha_b, args.gamma,
+                  args.method, args.eps_b, args.eps_b, 1.0, deadline)
+    QB = Q.copy()
+    if args.polish_episodes > 0:
+        run_phase(env, Q, rng, args.polish_episodes, args.alpha_c, args.gamma,
+                  args.method, args.eps_c, args.eps_c, 1.0, deadline)
+    env.close()
+    return QA, QB, Q
+
+
+def greedy_success(Q, env_kwargs, n=800, seed=50000):
+    """Fraction of successful episodes for the greedy policy on Q."""
+    env = make_env(env_kwargs, seed=seed)
+    wins = 0
+    for _ in range(n):
+        s, _ = env.reset()
+        done = False
+        while not done:
+            s, r, term, trunc, _ = env.step(int(np.argmax(Q[int(s)])))
+            s = int(s)
+            done = term or trunc
+            if term and r > 0:
+                wins += 1
+    env.close()
+    return wins / n
+
+
+# ---------------------------------------------------------------- main
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--out", type=str, required=True)
+    p.add_argument("--env-kwargs", type=str, default="{}")
+    # phase A: exploration
+    p.add_argument("--episodes", type=int, default=40000)
+    p.add_argument("--alpha", type=float, default=0.1)
+    p.add_argument("--gamma", type=float, default=0.99)
+    p.add_argument("--eps-start", type=float, default=1.0)
+    p.add_argument("--eps-end", type=float, default=0.05)
+    p.add_argument("--decay-frac", type=float, default=0.4)
+    # phase B / C: greedy refinement and polish
+    p.add_argument("--refine-episodes", type=int, default=20000)
+    p.add_argument("--alpha-b", type=float, default=0.02)
+    p.add_argument("--eps-b", type=float, default=0.01)
+    p.add_argument("--polish-episodes", type=int, default=10000)
+    p.add_argument("--alpha-c", type=float, default=0.01)
+    p.add_argument("--eps-c", type=float, default=0.005)
+    # bookkeeping
+    p.add_argument("--learners", type=int, default=3)
+    p.add_argument("--method", type=str, default="expected_sarsa")
+    p.add_argument("--select-episodes", type=int, default=800)
+    p.add_argument("--max-train-seconds", type=float, default=80.0)
+    args = p.parse_args()
+
+    env_kwargs = json.loads(args.env_kwargs) if args.env_kwargs else {}
+    env_kwargs.setdefault("is_slippery", True)
+    if "desc" not in env_kwargs:
+        env_kwargs.setdefault("map_name", "4x4")
+
+    os.makedirs(args.out, exist_ok=True)
+    t0 = time.time()
+    deadline = t0 + args.max_train_seconds
+
+    cands = {}
+    n_done = 0
+    for k in range(max(1, args.learners)):
+        if n_done >= 1 and time.time() > deadline:
+            print(f"time guard: skipping learner {k}")
+            break
+        tk = time.time()
+        QA, QB, QC = train_one(env_kwargs, args.seed + 1000 * k, args, deadline)
+        print(f"learner {k}: {time.time()-tk:.1f}s")
+        cands[f"a{k}"], cands[f"b{k}"], cands[f"c{k}"] = QA, QB, QC
+        n_done += 1
+    for tag, key in (("meanB", "b"), ("meanC", "c")):
+        group = [k for k in cands if k.startswith(key)]
+        if len(group) > 1:
+            cands[tag] = np.mean(np.stack([cands[k] for k in sorted(group)], 0), 0)
+
+    # rollout-based policy selection with common (paired) evaluation seeds
+    scores = {}
+    for name in sorted(cands):
+        scores[name] = greedy_success(cands[name], env_kwargs,
+                                      n=args.select_episodes, seed=50000)
+        print(f"select {name}: {scores[name]:.3f}")
+    best_name = max(scores, key=lambda k: scores[k])
+    best_Q = cands[best_name]
+    print(f"chosen={best_name} score={scores[best_name]:.3f}")
+
+    np.save(os.path.join(args.out, "q.npy"), np.asarray(best_Q, dtype=np.float64))
+
+    desc = None
+    try:
+        tmp = make_env(env_kwargs)
+        desc = ["".join(map(str, row)) for row in tmp.unwrapped.desc]
+        tmp.close()
+    except Exception:
+        desc = None
+
+    meta = {
+        "method": args.method,
+        "seed": args.seed,
+        "episodes": args.episodes,
+        "refine_episodes": args.refine_episodes,
+        "polish_episodes": args.polish_episodes,
+        "learners": n_done,
+        "alpha": args.alpha,
+        "alpha_b": args.alpha_b,
+        "alpha_c": args.alpha_c,
+        "gamma": args.gamma,
+        "eps_start": args.eps_start,
+        "eps_end": args.eps_end,
+        "eps_b": args.eps_b,
+        "eps_c": args.eps_c,
+        "decay_frac": args.decay_frac,
+        "chosen": best_name,
+        "scores": {k: float(v) for k, v in scores.items()},
+        "nS": int(best_Q.shape[0]),
+        "nA": int(best_Q.shape[1]),
+        "desc": desc,
+        "env_kwargs": {k: v for k, v in env_kwargs.items() if k != "desc"},
+    }
+    with open(os.path.join(args.out, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    print("total train time %.1fs" % (time.time() - t0))
+
+
+if __name__ == "__main__":
+    main()

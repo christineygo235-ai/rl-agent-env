@@ -1,0 +1,168 @@
+Results:
+- variant 0 (r8): dev 0.785 (DP optimal 0.747, our internal 0.747 — dev seeds gave 0.785, noise). Base threshold 0.7 ✓.
+- variant 1 (r7): dev 0.465. Threshold = 0.9 × 0.523 = 0.471 (if optimal computed with gamma 0.99) → 0.465 is just BELOW! Uh oh. If the harness uses the success-maximizing optimal policy, its success rate might differ slightly from my γ=0.99 DP. Hmm, 0.465 vs 0.471 — borderline fail. Internal paired eval said 0.503; dev seeds say 0.465. Difference 0.038 ≈ 1.9σ combining SEs (0.02, 0.035).
+
+This is the risk I flagged. I'd like to improve narrow-map performance to gain margin. All 10 runs used. I have 19 tool calls and 424s wall. Runs budget = 0 (well, "runs": 0 remaining, "runs": 2 earlier... now 0).
+
+Hmm, runs are exhausted. Max runs=10, all used (r1..r10). So I can't run training anymore?! But "runs": 1 was remaining and I used it for both variant 2 and 3 (two runs in parallel with only 1 remaining — apparently it decremented by 2 going to 0... it says runs: 0 now). So no more training runs.
+
+So I cannot test further. That means my final config must be chosen on reasoning alone. Careful: I should not make risky changes now. But can I improve narrow-map robustness knowing it's borderline?
+
+Important: was r7's 0.465 due to real gap or seed noise? My internal 600-episode paired eval said best candidate 0.503; harness dev eval (200 episodes) gave 0.465. Note the internal eval's expected value for the *selected max* is biased upward by selection. True value maybe ~0.49. And dev eval with 200 episodes has SE 0.035, so 0.465 is within 1σ of 0.49.
+
+The final scoring uses eval_episodes=1000 → SE ≈ 0.016. So expected ~0.49 vs threshold ~0.47. Margin ~1.2σ. Coin flip-ish risk per narrow map. I'd like to improve.
+
+Since I can't run training again, I must reason carefully about what change reliably improves the narrow-map case without risking others.
+
+Options:
+1. Leave as is.
+2. Reduce the ε-soft bias further / extend refinement: likely small improvement (phase B already gave +0.015 on variant 1: a2 0.487 → b2 0.503).
+3. Increase selection episodes (600→1000) to reduce selection noise. Cheap (time only, ~+2s). Slight expected gain since we pick a better candidate. Actually selection bias: with 800-1000 episodes the choice is more reliable. Paired candidate differences on variant 1: a-b differ by ~0.01-0.015, SE of paired diff smaller (paired, so ~0.005). So selection is reasonably reliable already.
+4. Improve Q accuracy: more training. Time budget: currently 36-47s. I could increase episodes from 40k to 60k and refine from 20k to 30k → 3×(90k)=270k episodes ≈ 60-70s on the slowest observed map (variant 2 at 0.28ms/ep: 270k×0.28ms=76s). Hmm, that's cutting close to the 120s limit but the final scoring machine may be slower/faster. Risky. A timeout would be fatal (exit nonzero → no policy).
+
+Careful: also note the final run may be on maps with more holes/longer episodes; episode length affects time. Worst case avg_len ~40, steps 270k×40 = 10.8M steps. On variant 0 r8 timing: 3 learners × 60k episodes = 180k in 46.5s → 0.26 ms/ep at avg_len 25 → ~10µs/step. 10.8M steps × 10µs = 108s. Too close!
+
+Safer: keep total episodes at 180k (current) — that took 36-47s. I could shift some episodes from phase A to phase B (phase A 30k, phase B 30k), keeping total constant. Phase B was where gains came from (on variant 1: a2 0.487 → b2 0.503; variant 2: 0.982 → 0.998). Both show phase B improving. So shifting budget toward refinement seems net positive. But phase A needs to have converged to a decent policy... 30k with α=0.1 ε→0.05 in 40% of 30k=12k episodes: should be well converged (20k already gave 0.77 dev on default map).
+
+Hmm, but is there risk that phase A (30k) is less converged, leading phase B to evaluate a worse policy? Phase B is on-policy evaluation + greedy improvement; it can still improve, but with ε_b=0.01 it can't explore out of a bad policy. Since candidate selection keeps both a{k} and b{k}, risk is bounded.
+
+Also consider adding a third phase: α even smaller for a final polish (e.g. 10k at α=0.005, ε=0.005) as extra candidates. Each extra phase adds candidates; selection picks best. Time cost.
+
+Given uncertainty, what gives the most robust improvement per unit risk?
+
+Actually, let me reconsider something more fundamental for narrow maps: the *evaluation* selection candidates are all quite close (0.478-0.503), which suggests all learners land near-optimal-ish but with a few wrong states. A per-state ensemble vote might fix wrong states. MeanB didn't help (0.478) - hmm, that's suspicious: averaging should reduce noise. Maybe mean-Q ranking differs.
+
+Alternative idea with high value: use *more* learners (e.g., 5) but shorter (e.g., episodes 25000 + refine 15000 = 40k each = 200k total ≈ 50-55s). More learners → better chance one lands near-optimal, and better ensemble. Selection over 5×2+1 = 11 candidates on 600 episodes: selection bias grows with #candidates but paired eval helps.
+
+Risk assessment: I can't test any change now. The safest change is one that provably can't hurt much: adding candidates (the current b/a are kept) and selecting with more eval episodes. Since all candidates come from valid tabular RL and selection is by measured success, a broader candidate pool + reliable selection can only help in expectation. But more candidates = more selection overfitting with 600 episodes. Mitigate by increasing select_episodes to 1000 (cost ~2-3s).
+
+Also, the risk of changing hyperparameters (episodes) without testing: e.g. 5 learners × 40k episodes (25k A + 15k B). Hmm, less per-learner training might reduce quality; but candidate diversity increases.
+
+Let me think about the numbers again: phase A 40k gives a-policies ~0.482-0.492; phase B improves to ~0.49-0.503. The DP optimum is 0.523. Phase B's remaining gap is partly because ε_b=0.01 still biases, and α_b=0.02 leaves noise.
+
+What about making phase B's target pure greedy (ε_b=0 exactly)? Then the update is: target = r + γ max Q(s') — i.e., Q-learning with a very small α, which converges to Q* (the optimal action-value) rather than the ε-soft one! Wait: with ε=0, expected SARSA = Q-learning = SARSA all become the same greedy-max update. So phase B with ε_b=0 is Q-learning with small α starting from a good init. That's the cleanest way to remove the soft bias and push toward Q*, which is exactly what we want (greedy w.r.t. Q* = optimal). With ε_b=0 there's no exploration, but we start from a well-trained Q, so the greedy policy visits the relevant states; Q-learning with max updates is off-policy-ish/optimistic, which can overestimate in rarely-visited states but those we start from converged estimates.
+
+Hmm, but ε_b=0 exactly removes the small exploration that fixes errors in rarely-visited states. Given that the states needing accuracy are on/near the optimal path (visited frequently under a near-greedy policy), it's probably fine. But if the greedy policy at some point enters a bad region... With ε_b=0.01 we keep a trickle of exploration; the ε-soft bias on variant 1 was worth ~0.02 improvement from A→B.
+
+Middle ground: ε_b = 0.005 and α_b = 0.01, with 20000 episodes. Or keep 0.01.
+
+Honestly, the improvements are marginal and uncertain. The differences observed are within noise. Let me instead think about whether I can reduce risk differently: the harness's threshold is 0.9×optimal. Our variant-1 result is ~0.49±0.02 vs 0.47. The main risk is the hidden maps being even narrower. Note: hidden variants count=2 with frozen_p=0.8 → random 4x4 maps. Nasty narrow maps like variant 1 (3 holes forming a wall) are the worst case; the optimum there was 0.52. Could a hidden map have an even lower optimum? Sure, e.g. a map with a single 6-7 step path fully surrounded by holes → optimum maybe 0.35. Then threshold 0.9×0.35=0.315 — our near-optimal policy would still be fine as long as we're within 10% relative.
+
+So the relative gap is what matters (~5%). Fine.
+
+Decision: make a small, well-reasoned set of improvements that diversify candidates and improve selection reliability, keeping total compute the same (~180k episodes) to stay well under the timeout:
+- Keep 3 learners; shift phases to A=30000, B=30000 (total 180k, same time).
+- Add a third phase? No, keep phases: A (ε 1→0.05, α 0.1), B (ε 0.01, α 0.02). Wait, with A=30k the ε decay over 40% = 12k.
+- Add candidates: a{k}, b{k}, meanB, and also "b" tables from a final short polish phase C (10k episodes, ε=0.002, α=0.01)? That adds 30k episodes → total 210k ≈ +17% time (up to ~55s on the slowest map). Hmm, extra time is fine if under ~70s.
+
+Actually, since candidates are cheap to evaluate and selection protects us, adding phase C (near-greedy, small α) gives a cleaner Q* estimate → could close the remaining ~0.02 gap. Cost: 3 × 10k = 30k extra episodes ≈ +10s. Total worst case ~60s. Acceptable? Final scoring timeout is 120s. Let's keep total ≈ 210k episodes, worst case observed 0.28ms/ep → 59s. Plus selection (11 candidates × 600 eps ≈ 6600 eps ≈ 2s) and DP removal. ~62s. OK, some margin.
+
+Hmm, but there's machine-speed uncertainty. Earlier runs: 40k learner on variant 2 took 13.4s → 0.335ms/ep. Wait, r9: 3 learners × 60k episodes = 180k in ~41s → 0.23ms/ep. And r2 (three learners, 60k each, variant 0) = 50s → 0.28ms/ep. So ~0.28ms/ep worst observed. 210k × 0.28ms = 59s. Fine, 2x margin.
+
+Let me be a bit conservative: A=30000, B=25000, C=10000 → 65k per learner × 3 = 195k ≈ 55s.
+
+Phase C: ε_c=0.005, α_c=0.01, and 10000 episodes. Hmm — what makes phase C different from B? Smaller α and ε. It converges closer to the fixed point of the greedy policy (Q^π), reducing residual noise/soft bias. Reasonable.
+
+Also improve the estimator accuracy by averaging the last part of training? Simpler: after phase C, Q is fine.
+
+Additionally, I could add a candidate that's the "mean over learners of phase C". Include meanB and meanC? More candidates = more selection noise with paired eval. Keep: a{k}, b{k}, c{k}, meanC. That's 3+3+3+1 = 10 candidates.
+
+Selection with 800 paired episodes → each candidate's SE 0.018, but paired differences between candidates much smaller. Selection over 10 candidates with paired comparisons is fine.
+
+Hmm, wait. There's a subtle issue with selection: I'm selecting the candidate with the highest *measured* success on 800 episodes drawn from a fixed seed set. The bias from selecting the max over 10 candidates with SE ~0.018 could be up to +0.02 in expectation. That inflates apparent quality but doesn't hurt the actual deployed policy... it just means the chosen one might not truly be the best. Fine.
+
+Let me also reconsider: should selection even happen? Without selection, which single candidate do I trust? The c{k} (most refined) or meanC. Data from r7: b (refined) ≥ a. And variant 2: b > a. So the refined table is generally better. Selection among a,b,c,meanC is a reasonable hedge. Keep.
+
+One more consideration on the risk of refinement hurting badly: if phase B/C collapses into a bad local optimum (e.g., a policy that reaches the goal via a long detour or gets stuck), the candidate would score low and not be selected. Also policy.py's tie-break prevents infinite loops. Safe.
+
+Now, am I sure the default `--select-episodes 600` etc. is fine? Let me set defaults: episodes=30000, learners=3, alpha=0.1, eps_start=1.0, eps_end=0.05, decay_frac=0.4, refine_episodes=25000, alpha_b=0.02, eps_b=0.01, polish_episodes=10000, alpha_c=0.01, eps_c=0.005, select_episodes=800.
+
+Wait, one thing to double check: with episodes=30000 (down from 40000), is phase A still converged? Earlier r1 with 20k episodes (single learner, α 0.1, ε→0.05 over 50%, 40k?) — r1 used default 20000 episodes at the time with decay 0.5 → dev 0.77 on default map. So 20k is enough for the default map. For narrow maps, 30k should be OK. And refinement adds more.
+
+Hmm, but there's a subtlety: r5/r6/r7 configs used 40k for phase A. Reducing to 30k is a change I can't test. Risk is modest. Alternatively keep A=40000, B=20000, C=10000 → 70k per learner × 3 = 210k ≈ 59s worst case. That keeps phase A identical to the tested config and adds only the polish phase. Safer! Time ~59s worst case (vs 47s tested max). Let's do that: A=40000 (unchanged), B=20000 (unchanged), C=10000 (new), total 210k.
+
+Actually, is phase C worth +13s? It adds a cleaner Q* estimate. Expected small gain. Alternatively skip C and just raise select_episodes to 1000 (~+2s). Simpler and lower risk...
+
+Let me decide: I'll include phase C since the two-phase data showed consistent monotone improvement with refinement, and C is a mild extension (α 0.01, ε 0.005, 10k eps). Also, since the max-episode-length is 100 and γ=0.99, no truncation issues.
+
+Hmm, actually there's one more risk I should double check: what if a hidden map has the goal unreachable-ish or a degenerate layout where random policies rarely succeed and 40k episodes of exploration never reach the goal? FrozenLake random maps with 20% holes: connectivity is usually fine. Variant maps all worked. Also with ε=1 initially, random walk finds the goal. Minor risk; the success-rate thresholds would also be near 0 then.
+
+Another risk: `map_name` might not be in env_kwargs for hidden maps (they pass desc). My defaults set map_name="4x4" via setdefault — if the harness passes only desc + is_slippery, then map_name="4x4" + desc → gymnasium raises ValueError? Actually FrozenLake: `if desc is None and map_name is None: map_name='4x4'`; passing both map_name and desc → gymnasium's FrozenLake accepts desc and ignores map_name? Let me check the source:
+
+```python
+def __init__(self, render_mode=None, desc=None, map_name="4x4", is_slippery=True):
+    ...
+    if desc is None and map_name is None:
+        desc = generate_random_map()
+    elif desc is None:
+        desc = MAPS[map_name]
+    self.desc = desc = np.asarray(desc, dtype="c")
+```
+So if desc is given, map_name is ignored. Good — no conflict. And run_training's variant maps passed desc + is_slippery without map_name, and my code added map_name="4x4" — that worked fine (r3..r10 all trained fine). 
+
+Also note: hidden final scoring passes "random 4x4 maps you have never seen (the map is passed in the env kwargs)" → desc given. Fine.
+
+But hmm, what if a hidden map is bigger than 4x4? "random 4x4 maps" — fine, and my code is size-agnostic anyway (except policy.py desc parsing which handles any nrow/ncol; and it uses len(desc[0]) for ncol — fine).
+
+One more: policy.py handles obs as int or array. Good.
+
+Now let me also double-check `greedy_success` line: `s, r, term, trunc, _ = env.step(int(np.argmax(Q[int(s)])))` — in train.py it's `s, r, term, ...` where the first returned is obs. Fine.
+
+Another detail: in `run_phase`, if `term` is True we don't bootstrap; if `trunc` (time limit) we do bootstrap — correct.
+
+Now the final train.py: remove the DP diagnostic function entirely and the --diag flag (keep flag? No, remove). Write REPORT.md with results citing r1..r10.
+
+Let me also record REPORT numbers:
+- r1: 20k single learner, variant 0, dev 0.770
+- r2: 3×60k, variant 0, internal sel 0.755, dev 0.760
+- r3: variant 1 (SFHF/FFFF/HHHF/HFFG), 3×60k, sel 0.53, dev 0.450
+- r4: variant 2 (SFFH/FFFF/FFFH/FFFG), 3×60k, sel 1.0, dev 1.000
+- r5: variant 1, 3×40k + mean, sel 0.495, DP 0.515
+- r6: variant 3 (SHFF/FFFF/FFFF/FFHG), 3×40k, sel 0.994, DP 0.990
+- r7: variant 1, two-phase (3×(40k+20k)), sel 0.503, dev 0.465, DP 0.523
+- r8: variant 0, two-phase, sel 0.747, dev 0.785, DP 0.747
+- r9: variant 2, two-phase, sel 0.998, DP 0.998, dev? not evaluated
+- r10: variant 3, two-phase, sel 0.993, DP 0.993, dev? not evaluated
+
+The Results section must include the bold dev mean return as the evaluate tool reported it: e.g. **0.785** for r8 (variant 0, base map, the task's env). The example in the prompt is **0.735**. I'll report the base-map dev result in bold: r8 gave 0.785. Good, cite as the headline result.
+
+Maybe I should evaluate r9/r10 with the harness too for completeness (2 tool calls, cheap, no runs consumed... evaluate consumes tool calls only). I have 19 calls. Let's do that to report dev returns for variants 2 and 3.
+
+Then write final train.py + REPORT.md + submit.
+
+Wait — one important thing: after I change train.py, the workspace artifact differs from what produced r7-r10. That's fine; final scoring re-runs train.py.
+
+Let me now: (a) evaluate r9, r10; (b) write the final train.py. I can do these in one block since evaluate doesn't use train.py.
+
+Let me write the final train.py now.
+
+Final structure (no DP code):
+
+Defaults:
+- episodes=40000, learners=3, alpha=0.1, gamma=0.99, eps_start=1.0, eps_end=0.05, decay_frac=0.4
+- refine_episodes=20000, alpha_b=0.02, eps_b=0.01
+- polish_episodes=10000, alpha_c=0.01, eps_c=0.005
+- select_episodes=800
+- method=expected_sarsa
+
+Candidates: a{k}, b{k}, c{k}, meanC. Actually also include meanB? Keep pool moderate: a{k}, b{k}, c{k}, meanB, meanC → 11 candidates. Selection with 800 paired episodes each: 8800 episodes ≈ 8800×25 steps = 220k steps ≈ 2-3s. Fine. Hmm, more candidates → more selection noise. Let me use a{k}, b{k}, c{k}, meanC (10 candidates). I'll keep meanB too — it's informative, and paired eval handles it. Eh, keep it: 11 candidates, ~3s.
+
+Total episodes: 3 × 70k = 210k.
+
+Let me estimate time on the slowest observed map (variant 2 = 0.23ms/ep from r9: 180k in 41s): 210k → 48s. On variant 0 (0.26ms/ep): 210k → 55s. Selection ~3s. Total ~58s < 120s. Acceptable, 2x margin.
+
+Hmm, the risk of timeout... If the final scoring machine is 2x slower, 116s → too close. Should I reduce? Let me reduce polish to 8000 and refine stays 20000, episodes 40000 → 68k × 3 = 204k. Marginal.
+
+Alternatively drop learners to 3 but reduce phase A to 35000 → 3×63k = 189k. Hmm, untested changes.
+
+I'll keep 210k but measure: actually the safest approach is to add a wall-clock guard in train.py: track elapsed time and skip the polish phase for remaining learners if running out of time. That protects against timeouts. Good idea — implement a soft deadline: `--max-train-seconds` default 80; before starting each phase/learner, check elapsed; if exceeding deadline, skip remaining phases/learners (but always keep at least one complete learner). This guarantees we produce a policy before the 120s timeout.
+
+Let me implement: in the learner loop, if elapsed > deadline and we already have ≥1 learner, break. Within a learner, skip phase C if elapsed > 0.8*deadline.
+
+Good. That makes the 210k config safe.
+
+Let me write it.
+
+Also keep `--method` so Q-learning/SARSA are available (mentioned in report: Expected SARSA default, tested variants?). I didn't actually test SARSA or Q-learning. Report should say Expected SARSA was chosen for its lower variance/lower overestimation and that Q-learning/ SARSA are available via --method but were not selected (or I shouldn't claim untested results). I'll be honest: only report runs I did.
+
+Write final train.py.

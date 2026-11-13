@@ -1,0 +1,133 @@
+{
+  "task_id": "cliffwalking-sarsa",
+  "task_version": 1,
+  "seeds": 10,
+  "has_variants": false,
+  "threshold": -17.0,
+  "gym_reward_threshold": null,
+  "results": [
+    {
+      "seed": 1234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -17.0,
+      "random_mean": -2254.25,
+      "threshold": -17.0,
+      "rerun_seconds": 0.714,
+      "variants": [],
+      "detail": "pass: mean -17 vs threshold -17"
+    },
+    {
+      "seed": 2234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -17.0,
+      "random_mean": -2132.03,
+      "threshold": -17.0,
+      "rerun_seconds": 0.702,
+      "variants": [],
+      "detail": "pass: mean -17 vs threshold -17"
+    },
+    {
+      "seed": 3234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -17.0,
+      "random_mean": -2072.72,
+      "threshold": -17.0,
+      "rerun_seconds": 0.88,
+      "variants": [],
+      "detail": "pass: mean -17 vs threshold -17"
+    },
+    {
+      "seed": 4234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -17.0,
+      "random_mean": -2028.02,
+      "threshold": -17.0,
+      "rerun_seconds": 0.762,
+      "variants": [],
+      "detail": "pass: mean -17 vs threshold -17"
+    },
+    {
+      "seed": 5234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -17.0,
+      "random_mean": -2080.43,
+      "threshold": -17.0,
+      "rerun_seconds": 0.662,
+      "variants": [],
+      "detail": "pass: mean -17 vs threshold -17"
+    },
+    {
+      "seed": 6234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -17.0,
+      "random_mean": -2047.34,
+      "threshold": -17.0,
+      "rerun_seconds": 0.654,
+      "variants": [],
+      "detail": "pass: mean -17 vs threshold -17"
+    },
+    {
+      "seed": 7234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -17.0,
+      "random_mean": -2103.23,
+      "threshold": -17.0,
+      "rerun_seconds": 0.652,
+      "variants": [],
+      "detail": "pass: mean -17 vs threshold -17"
+    },
+    {
+      "seed": 8234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -17.0,
+      "random_mean": -2115.47,
+      "threshold": -17.0,
+      "rerun_seconds": 0.662,
+      "variants": [],
+      "detail": "pass: mean -17 vs threshold -17"
+    },
+    {
+      "seed": 9234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -17.0,
+      "random_mean": -2002.4,
+      "threshold": -17.0,
+      "rerun_seconds": 0.693,
+      "variants": [],
+      "detail": "pass: mean -17 vs threshold -17"
+    },
+    {
+      "seed": 10234,
+      "success": true,
+      "reward": 0.9,
+      "eval_mean": -17.0,
+      "random_mean": -1972.49,
+      "threshold": -17.0,
+      "rerun_seconds": 0.693,
+      "variants": [],
+      "detail": "pass: mean -17 vs threshold -17"
+    }
+  ],
+  "pass_rate": 1.0,
+  "random_fails_everywhere": true,
+  "deterministic": true,
+  "max_rerun_seconds": 0.88,
+  "suggested_train_timeout_s": 30,
+  "eval_means": {
+    "min": -17.0,
+    "median": -17.0,
+    "max": -17.0
+  },
+  "optimal_fraction": null,
+  "admitted": true,
+  "reasons": []
+}

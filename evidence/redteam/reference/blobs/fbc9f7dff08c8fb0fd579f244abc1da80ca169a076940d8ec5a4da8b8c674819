@@ -1,0 +1,31 @@
+# Experiment report: FrozenLake-v1 (4x4, slippery)
+
+## Method
+Tabular Q-learning (Sutton & Barto, section 6.5): off-policy TD control with an
+epsilon-greedy behaviour policy and a greedy target. The final policy is
+greedy with respect to the learned Q-table (`policy.py`), stored as data
+(`q.npy`, 16x4).
+
+## Hyperparameters
+| Name | Value |
+|---|---|
+| episodes | 30000 |
+| gamma | 0.99 |
+| alpha | linear 0.2 → 0.01 |
+| epsilon | linear 1.0 → 0.05 over the first 60 % of episodes |
+| tie-breaking | random among maximal actions |
+| seed | 1234 |
+
+## Experiments
+| Run | Seed | Extra args | Exit | Train s | Dev episodes | Dev mean return |
+|---|---|---|---|---|---|---|
+| r1 | 1234 | - | 0 | 8.3 | 200 | 0.800 |
+
+## Results
+Mean return (success rate) of the greedy policy on 200 dev episodes,
+evaluated by the harness: **0.800** (threshold 0.7).
+
+## Limitations
+- Slippery dynamics cap the success rate near 0.74 even for the optimal policy;
+  differences between runs below about 0.02 are evaluation noise.
+- The learning rate schedule was not tuned beyond a handful of runs.

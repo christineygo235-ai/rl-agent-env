@@ -1,0 +1,127 @@
+"""Tabular Q-learning (Sutton & Barto, Ch. 6) on FrozenLake-v1.
+
+Usage:
+    python train.py --seed SEED --out DIR --env-kwargs JSON
+
+Trains on gymnasium.make("FrozenLake-v1", **json.loads(JSON)) and writes the
+greedy Q-table to DIR/q.npy (pure numpy, no pickle).
+"""
+
+import argparse
+import json
+import os
+
+import numpy as np
+
+
+def make_env(env_kwargs):
+    import gymnasium as gym
+
+    kw = dict(env_kwargs)
+    kw.pop("render_mode", None)
+    return gym.make("FrozenLake-v1", **kw)
+
+
+def q_learning(env_kwargs, seed, episodes, alpha0, gamma, eps_start, eps_end,
+               eps_frac, alpha_frac=None):
+    """Tabular Q-learning with epsilon-greedy behaviour and decaying epsilon.
+
+    Step size alpha decays linearly from alpha0 to alpha0/4 over `alpha_frac`
+    of training (constant afterwards); epsilon decays exponentially from
+    eps_start to eps_end over the first `eps_frac` of training.
+    """
+    rng = np.random.default_rng(seed)
+    env = make_env(env_kwargs)
+    n_states = int(env.observation_space.n)
+    n_actions = int(env.action_space.n)
+    q = np.zeros((n_states, n_actions), dtype=np.float64)
+
+    if alpha_frac is None:
+        alpha_frac = 0.8
+    eps_decay_episodes = max(1.0, eps_frac * episodes)
+    log_ratio = np.log(eps_end / eps_start)
+
+    for ep in range(episodes):
+        frac = ep / eps_decay_episodes
+        if frac >= 1.0:
+            eps = eps_end
+        else:
+            eps = eps_start * float(np.exp(log_ratio * frac))
+        a_frac = min(1.0, ep / max(1.0, alpha_frac * episodes))
+        alpha = alpha0 * (1.0 - 0.75 * a_frac)
+
+        s, _ = env.reset(seed=int(rng.integers(1 << 31)))
+        done = False
+        while not done:
+            if rng.random() < eps:
+                a = int(rng.integers(n_actions))
+            else:
+                a = int(np.argmax(q[s]))
+            s2, r, terminated, truncated, _ = env.step(a)
+            target = r
+            if not terminated:
+                target = r + gamma * float(np.max(q[s2]))
+            q[s, a] += alpha * (target - q[s, a])
+            s = s2
+            done = terminated or truncated
+    env.close()
+    return q
+
+
+def greedy_success(env_kwargs, q, seed, episodes=300):
+    """Estimate success rate of the greedy policy by interacting with env."""
+    rng = np.random.default_rng(seed)
+    env = make_env(env_kwargs)
+    n_actions = int(env.action_space.n)
+    wins = 0
+    for _ in range(episodes):
+        s, _ = env.reset(seed=int(rng.integers(1 << 31)))
+        done = False
+        while not done:
+            a = int(np.argmax(q[s]))
+            s, r, terminated, truncated, _ = env.step(a)
+            done = terminated or truncated
+            if terminated and r > 0:
+                wins += 1
+    env.close()
+    return wins / episodes
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", type=str, required=True)
+    ap.add_argument("--env-kwargs", type=str, default="{}")
+    ap.add_argument("--episodes", type=int, default=12000)
+    ap.add_argument("--restarts", type=int, default=3)
+    args = ap.parse_args()
+
+    env_kwargs = json.loads(args.env_kwargs) if args.env_kwargs else {}
+    os.makedirs(args.out, exist_ok=True)
+
+    configs = [
+        dict(episodes=args.episodes, alpha0=0.20, gamma=0.99,
+             eps_start=1.0, eps_end=0.02, eps_frac=0.7),
+        dict(episodes=args.episodes, alpha0=0.10, gamma=0.95,
+             eps_start=0.6, eps_end=0.01, eps_frac=0.8),
+        dict(episodes=args.episodes, alpha0=0.30, gamma=0.99,
+             eps_start=1.0, eps_end=0.05, eps_frac=0.9),
+    ][: max(1, args.restarts)]
+
+    best_q, best_score, scores = None, -1.0, []
+    for i, cfg in enumerate(configs):
+        q = q_learning(env_kwargs, seed=args.seed * 1000 + i, **cfg)
+        score = greedy_success(env_kwargs, q, seed=args.seed * 1000 + 500 + i,
+                               episodes=300)
+        scores.append(score)
+        print(f"[restart {i}] greedy success estimate = {score:.3f}")
+        if score > best_score:
+            best_score, best_q = score, q
+
+    np.save(os.path.join(args.out, "q.npy"), best_q)
+    print(f"best greedy success estimate = {best_score:.3f}")
+    print(f"saved Q-table {best_q.shape} to {os.path.join(args.out, 'q.npy')}")
+
+
+if __name__ == "__main__":
+    main()

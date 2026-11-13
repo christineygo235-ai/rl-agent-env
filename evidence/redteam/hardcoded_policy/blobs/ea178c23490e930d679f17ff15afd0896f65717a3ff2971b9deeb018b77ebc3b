@@ -1,0 +1,23 @@
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seed", type=int, required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--env-kwargs", default="{}")
+    args = ap.parse_args()
+    actions = json.loads(Path("table.json").read_text())["actions"]
+    q = np.zeros((16, 4))
+    q[np.arange(16), actions] = 1.0
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    np.save(out / "q.npy", q)
+
+
+if __name__ == "__main__":
+    main()

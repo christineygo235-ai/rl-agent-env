@@ -1,0 +1,33 @@
+# Calibrated in step 9: see calibration/taxi-tabular.md.
+id: taxi-tabular
+version: 1
+instruction: |
+  Solve Taxi-v4 with a tabular method from Sutton & Barto (Q-learning, SARSA or
+  Expected SARSA). Use numpy only.
+
+  Write train.py so that `python train.py --seed SEED --out DIR --env-kwargs JSON`
+  trains on `gymnasium.make("Taxi-v4", **json.loads(JSON))` and saves the policy as
+  data (e.g. a Q-table in DIR/q.npy; no pickle). Write policy.py with `load(path)`
+  returning an object whose `act(obs)` returns the greedy action.
+
+  Final scoring re-runs `python train.py --seed SEED --out DIR --env-kwargs JSON`
+  from scratch with no other arguments, then evaluates the policy on held-out seeds.
+
+  Finish with REPORT.md: Method, Hyperparameters, Experiments, Results, Limitations.
+  In Results, write your result in bold exactly as the evaluate tool reported its dev
+  mean return (e.g. **7.950**); only cite runs (r1, r2, ...) that you actually ran.
+env_id: Taxi-v4
+seed: 1234
+success:
+  metric: mean_return          # +20 delivery, -1 per step, -10 illegal pickup/drop-off
+  threshold: 7.5               # set from calibration (Gymnasium's 8 is within evaluation noise of optimal)
+  eval_episodes: 1000
+  dev_eval_episodes: 200
+  eval_seed_salt: taxi-v4-heldout
+budget:
+  wall_clock_s: 900
+  train_timeout_s: 120
+  max_tool_calls: 40
+  max_runs: 10
+methods:
+  allowed: [tabular_q_learning, sarsa, expected_sarsa]
